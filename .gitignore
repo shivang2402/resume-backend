@@ -43,3 +43,9 @@ htmlcov/
 tmp/
 temp/
 build/
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.synctex.gz
+templates/*.pdf
