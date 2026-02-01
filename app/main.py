@@ -3,6 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import engine, Base
+
+# Import models so they register with Base before create_all
+from app.models.user import User
+from app.models.section import Section
+from app.models.application import Application
+
 from app.routers import auth, sections, applications, generate
 
 # Create tables
