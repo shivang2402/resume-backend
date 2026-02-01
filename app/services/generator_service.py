@@ -147,7 +147,7 @@ def compile_pdf(build_dir: str, timeout: int = 60) -> bytes:
     # Run pdflatex twice (for references)
     for _ in range(2):
         result = subprocess.run(
-            ["pdflatex", "-interaction=nonstopmode", "-output-directory", build_dir, resume_tex],
+            ["/Library/TeX/texbin/pdflatex", "-interaction=nonstopmode", "-output-directory", build_dir, resume_tex],
             capture_output=True,
             timeout=timeout,
             cwd=build_dir,
