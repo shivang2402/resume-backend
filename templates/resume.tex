@@ -1,0 +1,66 @@
+\documentclass[letterpaper,10pt]{article}
+
+\usepackage{fontawesome5}
+\usepackage{latexsym}
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage[english]{babel}
+\usepackage{tabularx}
+\input{glyphtounicode}
+\setlength{\footskip}{4.08003pt}
+
+% Custom font
+\usepackage{mathptmx}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% Adjust margins
+\addtolength{\oddsidemargin}{-0.8in}
+\addtolength{\evensidemargin}{-0.9in}
+\addtolength{\textwidth}{1.7in}
+\addtolength{\topmargin}{-0.75in}
+\addtolength{\textheight}{1in}
+
+\urlstyle{same}
+\raggedbottom
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+% Sections formatting
+\titleformat{\section}{
+  \vspace{-12pt}\raggedright\large
+}{}{0em}{}[\color{black}\titlerule\vspace{-7pt}]
+
+% Ensure that generate pdf is machine readable/ATS parsable
+\pdfgentounicode=1
+
+\begin{document}
+\include{custom-commands}
+
+%----------HEADING----------%
+\input{src/heading}
+
+%-----------EDUCATION-----------%
+\input{src/education.tex}
+
+%-----------SKILLS-----------%
+\input{src/skills.tex}
+
+%-----------EXPERIENCE-----------%
+\input{src/experience.tex}
+
+%-----------PROJECTS-----------%
+\input{src/projects.tex}
+
+\vspace{-40pt}
+
+\end{document}
