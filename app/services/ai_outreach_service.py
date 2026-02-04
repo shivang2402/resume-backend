@@ -287,3 +287,226 @@ class AIOutreachService:
         response = model.generate_content(prompt)
         
         return response.text.strip()
+
+    @classmethod
+    def refine_message(
+        cls,
+        original_message: str,
+        refinement_instructions: str,
+        style: Optional[str] = None,
+        length: Optional[str] = None,
+        api_key: Optional[str] = None
+    ) -> dict:
+        """Refine an existing message based on user instructions."""
+        
+        char_limit = 300 if length == "short" else 600
+        
+        prompt = f"""You are helping refine a cold outreach message.
+
+**ORIGINAL MESSAGE:**
+{original_message}
+
+**REFINEMENT INSTRUCTIONS:**
+{refinement_instructions}
+
+**CONSTRAINTS:**
+- Style: {style or 'maintain current style'}
+- Maximum length: {char_limit} characters (STRICT for short messages)
+
+**INSTRUCTIONS:**
+1. Apply the refinement instructions to improve the message
+2. Keep the core intent and personalization unless specifically asked to change it
+3. Maintain any specific details about the person's background
+4. Output ONLY the refined message text, no explanations or preamble
+
+**REFINED MESSAGE:**"""
+        
+        model = cls._get_gemini_client(api_key)
+        response = model.generate_content(prompt)
+        refined = response.text.strip()
+        
+        # Enforce char limit for short messages
+        if length == "short" and len(refined) > 300:
+            refined = refined[:297] + "..."
+        
+        return {
+            "message": refined,
+            "char_count": len(refined)
+        }
+
+    @classmethod
+    def parse_conversation(
+        cls,
+        raw_text: str,
+        api_key: Optional[str] = None
+    ) -> dict:
+        """Parse a raw conversation dump into structured messages."""
+        import json
+        
+        prompt = f"""Parse this conversation into individual messages. For each message, determine:
+1. Direction: "sent" (from the job seeker/user) or "received" (from the recruiter/contact)
+2. Content: the message text (clean it up, remove timestamps from the text itself)
+3. Timestamp: if visible in the conversation (format: ISO 8601, e.g., "2026-01-15T14:30:00")
+
+**CONVERSATION TO PARSE:**
+{raw_text}
+
+**INSTRUCTIONS:**
+- Look for patterns like "Me:", "Them:", timestamps, or indentation to determine direction
+- If you see names, the first message sender is usually "sent" (the user reaching out)
+- Clean up the message content (remove leading timestamps, names, etc.)
+- If no clear timestamp, set message_at to null
+
+**RESPOND IN THIS EXACT JSON FORMAT (no markdown, no code blocks):**
+{{"messages": [{{"direction": "sent", "content": "message text here", "message_at": "2026-01-15T14:30:00"}}]}}
+
+If you cannot parse the conversation at all, respond with:
+{{"error": "Could not parse conversation"}}"""
+        
+        try:
+            model = cls._get_gemini_client(api_key)
+            response = model.generate_content(prompt)
+            
+            # Clean up response (remove markdown code blocks if present)
+            response_text = response.text.strip()
+            if response_text.startswith("```"):
+                response_text = response_text.split("```")[1]
+                if response_text.startswith("json"):
+                    response_text = response_text[4:]
+                response_text = response_text.strip()
+            
+            result = json.loads(response_text)
+            
+            if "error" in result:
+                return {
+                    "success": False,
+                    "messages": [],
+                    "raw_fallback": raw_text
+                }
+            
+            # Convert to proper format
+            parsed_messages = []
+            for m in result.get("messages", []):
+                parsed_messages.append({
+                    "direction": m.get("direction", "sent"),
+                    "content": m.get("content", ""),
+                    "message_at": m.get("message_at")
+                })
+            
+            return {
+                "success": True,
+                "messages": parsed_messages,
+                "raw_fallback": None
+            }
+            
+        except Exception as e:
+            # If parsing fails, return raw fallback
+            return {
+                "success": False,
+                "messages": [],
+                "raw_fallback": raw_text
+            }
+
+    @classmethod
+    def generate_reply(
+        cls,
+        db,
+        user_id,
+        thread_id,
+        instructions: Optional[str] = None,
+        style: str = "semi_formal",
+        length: str = "long",
+        api_key: Optional[str] = None
+    ) -> dict:
+        """Generate a reply for an ongoing conversation thread."""
+        from app.models.outreach_thread import OutreachThread
+        from app.models.outreach_message import OutreachMessage
+        from app.models.section import Section
+        from fastapi import HTTPException
+        
+        # Get the thread
+        thread = db.query(OutreachThread).filter(
+            OutreachThread.id == thread_id,
+            OutreachThread.user_id == user_id
+        ).first()
+        
+        if not thread:
+            raise HTTPException(status_code=404, detail="Thread not found")
+        
+        # Get all messages in the thread
+        messages = db.query(OutreachMessage).filter(
+            OutreachMessage.thread_id == thread_id
+        ).order_by(OutreachMessage.message_at.asc().nullsfirst(), OutreachMessage.created_at.asc()).all()
+        
+        if not messages:
+            raise HTTPException(status_code=400, detail="Thread has no messages to reply to")
+        
+        # Build conversation history
+        history_lines = []
+        for msg in messages:
+            direction_label = "ME" if msg.direction == "sent" else "THEM"
+            history_lines.append(f"[{direction_label}]: {msg.content}")
+        history = "\n\n".join(history_lines)
+        
+        # Get resume context
+        sections = db.query(Section).filter(
+            Section.user_id == user_id,
+            Section.is_current == True
+        ).all()
+        
+        resume_context = cls._fetch_resume_context(db, user_id) if sections else "No resume sections available."
+        
+        # Build the prompt
+        style_instructions = {
+            "professional": "formal and polished",
+            "semi_formal": "professional but approachable",
+            "casual": "friendly and conversational",
+            "friend": "warm and familiar"
+        }
+        
+        char_limit = 300 if length == "short" else 600
+        
+        prompt = f"""You are helping write a reply in an ongoing job-related conversation.
+
+**CONVERSATION HISTORY:**
+{history}
+
+**YOUR BACKGROUND:**
+{resume_context}
+
+**COMPANY:** {thread.company}
+**CONTACT:** {thread.contact_name or 'Unknown'}
+
+**STYLE:** {style_instructions.get(style, 'professional but approachable')}
+**MAX LENGTH:** {char_limit} characters
+
+"""
+        
+        if instructions:
+            prompt += f"""**SPECIFIC INSTRUCTIONS FROM USER:**
+{instructions}
+
+"""
+        
+        prompt += """**INSTRUCTIONS:**
+1. Write a natural reply that continues the conversation
+2. Reference your background if relevant to what they asked
+3. Be helpful and move toward your goal (getting a referral, interview, info)
+4. Match the conversation's energy while staying within your style
+5. Keep it concise and actionable
+6. Output ONLY the reply text, no explanations or preamble
+
+**YOUR REPLY:**"""
+        
+        model = cls._get_gemini_client(api_key)
+        response = model.generate_content(prompt)
+        reply = response.text.strip()
+        
+        # Enforce char limit for short messages
+        if length == "short" and len(reply) > 300:
+            reply = reply[:297] + "..."
+        
+        return {
+            "message": reply,
+            "char_count": len(reply)
+        }

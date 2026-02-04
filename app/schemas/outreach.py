@@ -1,6 +1,6 @@
 from datetime import datetime
 from uuid import UUID
-from typing import Optional, Any
+from typing import Optional, Any, List
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -131,28 +131,64 @@ class MessageResponse(BaseModel):
 # ============ AI GENERATION SCHEMAS ============
 
 class GenerateMessageRequest(BaseModel):
-    template_id: UUID
+    """Request to generate a new outreach message."""
+    template_id: Optional[UUID] = None
     company: str
     contact_name: Optional[str] = None
-    resume_config: Optional[dict[str, Any]] = None
-    additional_context: Optional[str] = None
+    style: Optional[WritingStyle] = None
+    length: Optional[MessageLength] = None
+    jd_text: Optional[str] = None
+    application_id: Optional[UUID] = None
     api_key: Optional[str] = None
 
 
-class GenerateReplyRequest(BaseModel):
-    thread_id: UUID
-    received_message: str
-    style: Optional[WritingStyle] = WritingStyle.PROFESSIONAL
-    length: Optional[MessageLength] = MessageLength.SHORT
-    additional_instructions: Optional[str] = None
-    api_key: Optional[str] = None
+class GenerateMessageResponse(BaseModel):
+    """Response from generating a message."""
+    message: str
 
 
 class RefineMessageRequest(BaseModel):
+    """Request to refine an existing message."""
     original_message: str
     refinement_instructions: str
-    api_key: Optional[str] = None
+    style: Optional[WritingStyle] = None
+    length: Optional[MessageLength] = None
 
 
-class GeneratedMessageResponse(BaseModel):
+class RefineMessageResponse(BaseModel):
+    """Response from refining a message."""
     message: str
+    char_count: int
+
+
+class ParseConversationRequest(BaseModel):
+    """Request to parse a raw conversation dump."""
+    raw_text: str
+
+
+class ParsedMessage(BaseModel):
+    """A single parsed message from a conversation."""
+    direction: MessageDirection
+    content: str
+    message_at: Optional[datetime] = None
+
+
+class ParseConversationResponse(BaseModel):
+    """Response from parsing a conversation."""
+    success: bool
+    messages: List[ParsedMessage] = []
+    raw_fallback: Optional[str] = None
+
+
+class GenerateReplyRequest(BaseModel):
+    """Request to generate a reply for a thread."""
+    thread_id: UUID
+    instructions: Optional[str] = None
+    style: Optional[WritingStyle] = WritingStyle.SEMI_FORMAL
+    length: Optional[MessageLength] = MessageLength.LONG
+
+
+class GenerateReplyResponse(BaseModel):
+    """Response from generating a reply."""
+    message: str
+    char_count: int
