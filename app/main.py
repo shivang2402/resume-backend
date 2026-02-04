@@ -9,7 +9,7 @@ from app.models.user import User
 from app.models.section import Section
 from app.models.application import Application
 
-from app.routers import auth, sections, applications, generate
+from app.routers import auth, sections, applications, generate, ai
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -34,6 +34,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(sections.router, prefix="/api/sections", tags=["sections"])
 app.include_router(applications.router, prefix="/api/applications", tags=["applications"])
 app.include_router(generate.router, prefix="/api/generate", tags=["generate"])
+app.include_router(ai.router, prefix="/api/ai", tags=["ai"])
 
 
 @app.get("/health")
