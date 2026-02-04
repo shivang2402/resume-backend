@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 
 from app.database import get_db
 from app.schemas.outreach import (
-    TemplateCreate, TemplateUpdate, TemplateResponse
+    TemplateCreate, TemplateUpdate, TemplateResponse,
+    ThreadCreate, ThreadUpdate, ThreadResponse,
+    MessageCreate, MessageResponse
 )
 from app.services.outreach_service import OutreachService
 
@@ -19,7 +21,6 @@ def list_templates(
     user_id: UUID = Header(..., alias="X-User-ID"),
     db: Session = Depends(get_db)
 ):
-    """List all templates for user"""
     return OutreachService.list_templates(db, user_id)
 
 
@@ -29,7 +30,6 @@ def create_template(
     user_id: UUID = Header(..., alias="X-User-ID"),
     db: Session = Depends(get_db)
 ):
-    """Create a new template"""
     return OutreachService.create_template(db, user_id, data)
 
 
@@ -39,7 +39,6 @@ def get_template(
     user_id: UUID = Header(..., alias="X-User-ID"),
     db: Session = Depends(get_db)
 ):
-    """Get a single template"""
     return OutreachService.get_template(db, user_id, template_id)
 
 
@@ -50,7 +49,6 @@ def update_template(
     user_id: UUID = Header(..., alias="X-User-ID"),
     db: Session = Depends(get_db)
 ):
-    """Update a template"""
     return OutreachService.update_template(db, user_id, template_id, data)
 
 
@@ -60,6 +58,97 @@ def delete_template(
     user_id: UUID = Header(..., alias="X-User-ID"),
     db: Session = Depends(get_db)
 ):
-    """Delete a template"""
     OutreachService.delete_template(db, user_id, template_id)
     return {"status": "deleted"}
+
+
+# ============ THREADS ============
+
+@router.get("/threads", response_model=List[ThreadResponse])
+def list_threads(
+    active_only: bool = False,
+    user_id: UUID = Header(..., alias="X-User-ID"),
+    db: Session = Depends(get_db)
+):
+    return OutreachService.list_threads(db, user_id, active_only)
+
+
+@router.post("/threads", response_model=ThreadResponse, status_code=201)
+def create_thread(
+    data: ThreadCreate,
+    user_id: UUID = Header(..., alias="X-User-ID"),
+    db: Session = Depends(get_db)
+):
+    return OutreachService.create_thread(db, user_id, data)
+
+
+@router.get("/threads/{thread_id}", response_model=ThreadResponse)
+def get_thread(
+    thread_id: UUID,
+    user_id: UUID = Header(..., alias="X-User-ID"),
+    db: Session = Depends(get_db)
+):
+    return OutreachService.get_thread(db, user_id, thread_id)
+
+
+@router.put("/threads/{thread_id}", response_model=ThreadResponse)
+def update_thread(
+    thread_id: UUID,
+    data: ThreadUpdate,
+    user_id: UUID = Header(..., alias="X-User-ID"),
+    db: Session = Depends(get_db)
+):
+    return OutreachService.update_thread(db, user_id, thread_id, data)
+
+
+@router.delete("/threads/{thread_id}")
+def delete_thread(
+    thread_id: UUID,
+    user_id: UUID = Header(..., alias="X-User-ID"),
+    db: Session = Depends(get_db)
+):
+    OutreachService.delete_thread(db, user_id, thread_id)
+    return {"status": "deleted"}
+
+
+# ============ MESSAGES ============
+
+@router.get("/threads/{thread_id}/messages", response_model=List[MessageResponse])
+def list_messages(
+    thread_id: UUID,
+    user_id: UUID = Header(..., alias="X-User-ID"),
+    db: Session = Depends(get_db)
+):
+    return OutreachService.list_messages(db, user_id, thread_id)
+
+
+@router.post("/threads/{thread_id}/messages", response_model=MessageResponse, status_code=201)
+def add_message(
+    thread_id: UUID,
+    data: MessageCreate,
+    user_id: UUID = Header(..., alias="X-User-ID"),
+    db: Session = Depends(get_db)
+):
+    return OutreachService.add_message(db, user_id, thread_id, data)
+
+
+@router.delete("/threads/{thread_id}/messages/{message_id}")
+def delete_message(
+    thread_id: UUID,
+    message_id: UUID,
+    user_id: UUID = Header(..., alias="X-User-ID"),
+    db: Session = Depends(get_db)
+):
+    OutreachService.delete_message(db, user_id, thread_id, message_id)
+    return {"status": "deleted"}
+
+
+# ============ UTILITY ============
+
+@router.get("/applications-by-company")
+def get_applications_by_company(
+    company: str,
+    user_id: UUID = Header(..., alias="X-User-ID"),
+    db: Session = Depends(get_db)
+):
+    return OutreachService.get_applications_by_company(db, user_id, company)
