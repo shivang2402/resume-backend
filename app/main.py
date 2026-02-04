@@ -4,7 +4,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import engine, Base
 
-# Import models so they register with Base before create_all
 from app.models.user import User
 from app.models.section import Section
 from app.models.application import Application
@@ -12,9 +11,8 @@ from app.models.outreach_template import OutreachTemplate
 from app.models.outreach_thread import OutreachThread
 from app.models.outreach_message import OutreachMessage
 
-from app.routers import auth, sections, applications, generate, ai
+from app.routers import auth, sections, applications, generate, ai, outreach
 
-# Create tables
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
@@ -23,7 +21,6 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins.split(","),
@@ -32,12 +29,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Routers
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(sections.router, prefix="/api/sections", tags=["sections"])
 app.include_router(applications.router, prefix="/api/applications", tags=["applications"])
 app.include_router(generate.router, prefix="/api/generate", tags=["generate"])
 app.include_router(ai.router, prefix="/api/ai", tags=["ai"])
+app.include_router(outreach.router, prefix="/api/outreach", tags=["outreach"])
 
 
 @app.get("/health")
