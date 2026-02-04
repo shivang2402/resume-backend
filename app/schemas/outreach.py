@@ -126,3 +126,33 @@ class MessageResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ============ AI GENERATION SCHEMAS ============
+
+class GenerateMessageRequest(BaseModel):
+    template_id: UUID
+    company: str
+    contact_name: Optional[str] = None
+    resume_config: Optional[dict[str, Any]] = None
+    additional_context: Optional[str] = None
+    api_key: Optional[str] = None
+
+
+class GenerateReplyRequest(BaseModel):
+    thread_id: UUID
+    received_message: str
+    style: Optional[WritingStyle] = WritingStyle.PROFESSIONAL
+    length: Optional[MessageLength] = MessageLength.SHORT
+    additional_instructions: Optional[str] = None
+    api_key: Optional[str] = None
+
+
+class RefineMessageRequest(BaseModel):
+    original_message: str
+    refinement_instructions: str
+    api_key: Optional[str] = None
+
+
+class GeneratedMessageResponse(BaseModel):
+    message: str
