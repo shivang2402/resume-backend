@@ -8,6 +8,9 @@ from app.database import engine, Base
 from app.models.user import User
 from app.models.section import Section
 from app.models.application import Application
+from app.models.outreach_template import OutreachTemplate
+from app.models.outreach_thread import OutreachThread
+from app.models.outreach_message import OutreachMessage
 
 from app.routers import auth, sections, applications, generate, ai
 
