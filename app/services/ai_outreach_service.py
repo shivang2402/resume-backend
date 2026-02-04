@@ -510,3 +510,114 @@ If you cannot parse the conversation at all, respond with:
             "message": reply,
             "char_count": len(reply)
         }
+
+    @classmethod
+    def generate_message(
+        cls,
+        db: Session,
+        user_id: UUID,
+        company: str,
+        style: str = "semi_formal",
+        length: str = "short",
+        template_id: Optional[UUID] = None,
+        contact_name: Optional[str] = None,
+        jd_text: Optional[str] = None,
+        application_id: Optional[UUID] = None,
+        api_key: Optional[str] = None
+    ) -> dict:
+        """Generate a cold outreach message."""
+        from app.models.application import Application
+        
+        # Get template content if provided
+        template_content = ""
+        if template_id:
+            template = db.query(OutreachTemplate).filter(
+                OutreachTemplate.id == template_id,
+                OutreachTemplate.user_id == user_id
+            ).first()
+            if template:
+                template_content = f"Use this as inspiration:\n{template.content}"
+                style = template.style
+                length = template.length
+        
+        # Get application context if provided
+        app_context = ""
+        if application_id:
+            app = db.query(Application).filter(
+                Application.id == application_id,
+                Application.user_id == user_id
+            ).first()
+            if app:
+                app_context = f"Role: {app.role} at {app.company}"
+                if app.job_url:
+                    app_context += f"\nJob URL: {app.job_url}"
+        
+        # Get resume context
+        resume_context = cls._fetch_resume_context(db, user_id)
+        
+        # Build prompt
+        char_limit = 300 if length == "short" else 600
+        
+        style_guidance = {
+            "professional": "Use formal, professional language. Be respectful and business-like.",
+            "semi_formal": "Use a friendly but professional tone. Balance warmth with professionalism.",
+            "casual": "Use a relaxed, conversational tone. Be friendly and approachable.",
+            "friend": "Write as if messaging a friend. Be warm, casual, and genuine."
+        }
+        
+        prompt = f"""Generate a cold outreach message for job networking.
+
+**TARGET:**
+- Company: {company}
+- Contact: {contact_name or "a professional at the company"}
+
+**STYLE:** {style}
+{style_guidance.get(style, style_guidance["semi_formal"])}
+
+**LENGTH:** Maximum {char_limit} characters (this is STRICT for short messages)
+
+**SENDER'S BACKGROUND:**
+{resume_context}
+
+"""
+        
+        if template_content:
+            prompt += f"""**TEMPLATE TO FOLLOW:**
+{template_content}
+
+"""
+        
+        if jd_text:
+            prompt += f"""**JOB DESCRIPTION CONTEXT:**
+{jd_text[:1000]}
+
+"""
+        
+        if app_context:
+            prompt += f"""**APPLICATION CONTEXT:**
+{app_context}
+
+"""
+        
+        prompt += """**INSTRUCTIONS:**
+1. Write a concise, personalized cold outreach message
+2. Reference specific relevant experience from the sender's background
+3. Make it clear what you're asking for (referral, coffee chat, advice, etc.)
+4. Do NOT use generic phrases like "I'm excited" or "I'm passionate"
+5. Do NOT start with "I hope this message finds you well"
+6. Be specific and genuine
+7. Output ONLY the message text, no explanations
+
+**GENERATE THE MESSAGE:**"""
+        
+        model = cls._get_gemini_client(api_key)
+        response = model.generate_content(prompt)
+        message = response.text.strip()
+        
+        # Enforce char limit for short messages
+        if length == "short" and len(message) > 300:
+            message = message[:297] + "..."
+        
+        return {
+            "message": message
+        }

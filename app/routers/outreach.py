@@ -167,6 +167,7 @@ def delete_message(
 def generate_message(
     data: GenerateMessageRequest,
     user_id: UUID = Header(..., alias="X-User-ID"),
+    api_key: str = Header(..., alias="X-Gemini-API-Key"),
     db: Session = Depends(get_db)
 ):
     """Generate a new outreach message using AI."""
@@ -180,7 +181,7 @@ def generate_message(
         length=data.length.value if data.length else None,
         jd_text=data.jd_text,
         application_id=data.application_id,
-        api_key=data.api_key
+        api_key=api_key
     )
 
 
