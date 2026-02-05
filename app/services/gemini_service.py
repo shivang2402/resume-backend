@@ -6,8 +6,9 @@ Used by: Cold Outreach, JD Matcher
 import google.generativeai as genai
 from google.generativeai.types import GenerationConfig
 from fastapi import HTTPException
-from typing import Optional
+from typing import Optional, Dict, List, Any
 import json
+import re
 
 
 class GeminiServiceError(Exception):
@@ -25,6 +26,11 @@ class GeminiRateLimitError(GeminiServiceError):
     pass
 
 
+# Aliases for JD Matcher compatibility
+GeminiError = GeminiServiceError
+GeminiAuthError = GeminiAPIKeyError
+
+
 class GeminiService:
     """
     Reusable Gemini Pro API client.
@@ -32,7 +38,7 @@ class GeminiService:
     Uses BYOK (Bring Your Own Key) model - API key passed per request.
     """
     
-    DEFAULT_MODEL = "gemini-2.5-flash"
+    DEFAULT_MODEL = "gemini-2.0-flash"
     
     def __init__(self, api_key: str):
         """Initialize Gemini client with user's API key."""
@@ -182,3 +188,141 @@ def handle_gemini_error(e: Exception) -> HTTPException:
             status_code=500,
             detail={"error": "ai_error", "message": str(e)}
         )
+
+
+# ============================================
+# JD Matcher Functions (async for analyze)
+# ============================================
+
+async def analyze_jd_with_gemini(
+    api_key: str,
+    job_description: str,
+    additional_instructions: Optional[str],
+    sections: Dict[str, List],
+    pinned_sections: List[Dict]
+) -> Dict[str, Any]:
+    """
+    Call Gemini to analyze JD against user's sections.
+    Returns suggestions and missing keywords.
+    """
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('gemini-2.0-flash')
+    
+    prompt = build_analysis_prompt(
+        job_description,
+        additional_instructions,
+        sections,
+        pinned_sections
+    )
+    
+    try:
+        response = await model.generate_content_async(prompt)
+        result = parse_gemini_response(response.text)
+        return result
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "api key" in error_msg or "authentication" in error_msg or "api_key" in error_msg:
+            raise GeminiAuthError("Invalid API key")
+        elif "quota" in error_msg or "rate" in error_msg or "resource" in error_msg:
+            raise GeminiRateLimitError("Rate limit exceeded")
+        else:
+            raise GeminiError(f"Gemini error: {str(e)}")
+
+
+def build_analysis_prompt(
+    job_description: str,
+    additional_instructions: Optional[str],
+    sections: Dict[str, List],
+    pinned_sections: List[Dict]
+) -> str:
+    """Build the Gemini prompt for JD analysis."""
+    
+    prompt = f"""You are a resume optimization assistant.
+I have a job description and resume sections with different "flavors" (variations).
+Analyze the JD and suggest which sections/flavors to include.
+
+**Job Description:**
+{job_description}
+
+"""
+    
+    if additional_instructions:
+        prompt += f"""**Additional Instructions:**
+{additional_instructions}
+
+"""
+    
+    if pinned_sections:
+        prompt += "**Required Sections (must include):**\n"
+        for ps in pinned_sections:
+            prompt += f"- {ps['type'].title()}: {ps['key']} (flavor: {ps['flavor']})\n"
+        prompt += "\n"
+    
+    prompt += "**Available Sections:**\n\n"
+    
+    # Experiences
+    prompt += "EXPERIENCES:\n"
+    for exp in sections.get('experiences', []):
+        prompt += f"- Key: {exp['key']}\n"
+        for flavor_info in exp['flavors']:
+            prompt += f"  - Flavor '{flavor_info['flavor']}' (v{flavor_info['version']}):\n"
+            prompt += f"    {flavor_info['content_summary']}\n"
+    
+    # Projects
+    prompt += "\nPROJECTS:\n"
+    for proj in sections.get('projects', []):
+        prompt += f"- Key: {proj['key']}\n"
+        for flavor_info in proj['flavors']:
+            prompt += f"  - Flavor '{flavor_info['flavor']}' (v{flavor_info['version']}):\n"
+            prompt += f"    {flavor_info['content_summary']}\n"
+    
+    # Skills
+    prompt += "\nSKILLS FLAVORS:\n"
+    for skill in sections.get('skills', []):
+        prompt += f"- Flavor '{skill['flavor']}' (v{skill['version']}): {skill['content_summary']}\n"
+    
+    prompt += """
+**Instructions:**
+1. Select 2-4 experiences that best match this JD (plus any required sections)
+2. Select 2-3 projects that best match this JD
+3. Select the best skills flavor
+4. For each section, pick the most relevant flavor
+5. List important keywords from the JD that are NOT in the selected sections
+
+**Respond in this exact JSON format (no markdown, no explanation):**
+{
+  "skills_flavor": "string",
+  "experiences": [
+    {"key": "string", "flavor": "string"}
+  ],
+  "projects": [
+    {"key": "string", "flavor": "string"}
+  ],
+  "missing_keywords": ["string", "string"]
+}
+"""
+    
+    return prompt
+
+
+def parse_gemini_response(response_text: str) -> Dict[str, Any]:
+    """Parse Gemini response, extracting JSON."""
+    
+    # Try to find JSON in response
+    json_match = re.search(r'\{[\s\S]*\}', response_text)
+    
+    if not json_match:
+        raise GeminiError("No JSON found in response")
+    
+    try:
+        result = json.loads(json_match.group())
+        
+        # Validate structure
+        required_keys = ['skills_flavor', 'experiences', 'projects', 'missing_keywords']
+        for key in required_keys:
+            if key not in result:
+                raise GeminiError(f"Missing key in response: {key}")
+        
+        return result
+    except json.JSONDecodeError as e:
+        raise GeminiError(f"Invalid JSON in response: {str(e)}")

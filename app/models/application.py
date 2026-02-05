@@ -23,6 +23,7 @@ class Application(Base):
     status = Column(String(50), default="applied")  # applied, phone_screen, technical, onsite, offer, rejected, ghosted, withdrawn
 
     resume_config = Column(JSONB, nullable=False)   # references to section versions used
+    job_description = Column(Text, nullable=True)   # NEW: store JD text
 
     applied_at = Column(Date, nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
