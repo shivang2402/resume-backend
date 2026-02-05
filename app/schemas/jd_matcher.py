@@ -10,6 +10,7 @@ class SectionSuggestion(BaseModel):
     flavor: str
     version: str
     pinned: bool = False
+    reason: str = ""
 
 class Suggestions(BaseModel):
     skills_flavor: str
