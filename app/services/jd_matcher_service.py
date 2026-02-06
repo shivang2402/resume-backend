@@ -26,15 +26,15 @@ async def match_sections_to_jd(
     
     try:
         response = await model.generate_content_async(prompt)
-        return _parse_match_response(response.text)
+        result = _parse_match_response(response.text)
+        
+        # Ensure we always return results if sections exist
+        result = _ensure_results(result, sections_with_tags, pinned_sections)
+        
+        return result
     except Exception as e:
         print(f"Matching failed: {e}")
-        return {
-            "experiences": [],
-            "projects": [],
-            "skills_flavor": "default",
-            "missing_keywords": [],
-        }
+        raise  # Re-raise for router to handle
 
 
 def _build_match_prompt(
@@ -80,21 +80,26 @@ Remote: {jd_info.get('remote', 'unknown')}
     
     prompt += """
 TASK:
-1. Select 2-4 best matching experiences
-2. Select 2-3 best matching projects  
-3. Select best skills flavor
+1. Select 2-4 best matching experiences (MUST select at least 2 if available, even if match is weak)
+2. Select 2-3 best matching projects (MUST select at least 2 if available, even if match is weak)
+3. Select best skills flavor (MUST select one if available)
 4. List important JD terms NOT covered by selected sections
-5. For each selection, explain WHY it matches
+5. For each selection, explain WHY it matches (or say "closest available" if weak match)
 
-Return ONLY this JSON:
+IMPORTANT: 
+- Always return the closest matching sections. Never return empty arrays if sections are available.
+- The "key" and "flavor" must be SEPARATE fields, exactly as shown in AVAILABLE SECTIONS above.
+- Format: key is BEFORE the colon, flavor is AFTER the colon (e.g., "tesla:mechanical" means key="tesla", flavor="mechanical")
+
+Return ONLY this JSON (no markdown, no extra text):
 {
   "experiences": [
-    {"key": "...", "flavor": "...", "reason": "matches X, Y, Z"}
+    {"key": "tesla", "flavor": "mechanical", "reason": "matches X, Y, Z"}
   ],
   "projects": [
-    {"key": "...", "flavor": "...", "reason": "matches X, Y"}
+    {"key": "battery_management", "flavor": "electrical", "reason": "matches X, Y"}
   ],
-  "skills_flavor": "...",
+  "skills_flavor": "systems",
   "missing_keywords": ["term1", "term2"]
 }
 
@@ -109,7 +114,30 @@ def _parse_match_response(response_text: str) -> Dict[str, Any]:
     
     if json_match:
         try:
-            return json.loads(json_match.group())
+            result = json.loads(json_match.group())
+            
+            # Fix malformed key:flavor combinations
+            for exp in result.get('experiences', []):
+                if ':' in exp.get('key', ''):
+                    parts = exp['key'].split(':')
+                    exp['key'] = parts[0]
+                    if len(parts) > 1 and (not exp.get('flavor') or ':' in exp.get('flavor', '')):
+                        exp['flavor'] = parts[1]
+                # Clean flavor if it contains brackets or extra text
+                if exp.get('flavor'):
+                    exp['flavor'] = exp['flavor'].split('[')[0].split(':')[-1].strip()
+            
+            for proj in result.get('projects', []):
+                if ':' in proj.get('key', ''):
+                    parts = proj['key'].split(':')
+                    proj['key'] = parts[0]
+                    if len(parts) > 1 and (not proj.get('flavor') or ':' in proj.get('flavor', '')):
+                        proj['flavor'] = parts[1]
+                # Clean flavor if it contains brackets or extra text
+                if proj.get('flavor'):
+                    proj['flavor'] = proj['flavor'].split('[')[0].split(':')[-1].strip()
+            
+            return result
         except json.JSONDecodeError:
             pass
     
@@ -119,3 +147,74 @@ def _parse_match_response(response_text: str) -> Dict[str, Any]:
         "skills_flavor": "default",
         "missing_keywords": []
     }
+
+
+def _ensure_results(
+    result: Dict[str, Any],
+    sections_with_tags: Dict[str, List[Dict]],
+    pinned_sections: List[Dict]
+) -> Dict[str, Any]:
+    """Ensure we always return results if sections are available."""
+    
+    experiences = sections_with_tags.get('experiences', [])
+    projects = sections_with_tags.get('projects', [])
+    skills = sections_with_tags.get('skills', [])
+    
+    # If no experiences returned but we have some, add closest ones
+    if not result.get('experiences') and experiences:
+        result['experiences'] = []
+        for exp in experiences[:3]:
+            flavors = exp.get('flavors', [])
+            if flavors:
+                result['experiences'].append({
+                    'key': exp['key'],
+                    'flavor': flavors[0]['flavor'],
+                    'reason': 'closest available match'
+                })
+    
+    # If no projects returned but we have some, add closest ones
+    if not result.get('projects') and projects:
+        result['projects'] = []
+        for proj in projects[:2]:
+            flavors = proj.get('flavors', [])
+            if flavors:
+                result['projects'].append({
+                    'key': proj['key'],
+                    'flavor': flavors[0]['flavor'],
+                    'reason': 'closest available match'
+                })
+    
+    # If no skills flavor but we have some, pick first
+    if (not result.get('skills_flavor') or result.get('skills_flavor') == 'default') and skills:
+        result['skills_flavor'] = skills[0]['flavor']
+    
+    # Ensure pinned sections are included
+    for pinned in pinned_sections:
+        section_type = pinned['type']
+        key = pinned['key']
+        flavor = pinned.get('flavor')
+        
+        list_key = 'experiences' if section_type == 'experience' else 'projects'
+        
+        # Check if already in results
+        already_included = any(
+            s['key'] == key for s in result.get(list_key, [])
+        )
+        
+        if not already_included:
+            # Find the flavor from available sections
+            if not flavor:
+                for section in sections_with_tags.get(list_key, []):
+                    if section['key'] == key and section.get('flavors'):
+                        flavor = section['flavors'][0]['flavor']
+                        break
+            
+            if flavor:
+                result[list_key] = result.get(list_key, [])
+                result[list_key].insert(0, {
+                    'key': key,
+                    'flavor': flavor,
+                    'reason': 'pinned section'
+                })
+    
+    return result

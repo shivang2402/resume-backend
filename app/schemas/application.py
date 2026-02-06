@@ -1,9 +1,7 @@
 from datetime import date, datetime
 from uuid import UUID
 from typing import Optional, Any
-
-from pydantic import BaseModel
-
+from pydantic import BaseModel, Field
 
 class ApplicationCreate(BaseModel):
     company: str
@@ -12,11 +10,10 @@ class ApplicationCreate(BaseModel):
     job_id: Optional[str] = None
     location: Optional[str] = None
     resume_config: dict[str, Any]
-    applied_at: date
+    applied_at: date = Field(default_factory=date.today)
     notes: Optional[str] = None
     referral: Optional[str] = None
     salary_range: Optional[str] = None
-
 
 class ApplicationUpdate(BaseModel):
     company: Optional[str] = None
@@ -28,7 +25,6 @@ class ApplicationUpdate(BaseModel):
     notes: Optional[str] = None
     referral: Optional[str] = None
     salary_range: Optional[str] = None
-
 
 class ApplicationResponse(BaseModel):
     id: UUID
@@ -46,6 +42,6 @@ class ApplicationResponse(BaseModel):
     notes: Optional[str] = None
     referral: Optional[str] = None
     salary_range: Optional[str] = None
-
+    
     class Config:
         from_attributes = True

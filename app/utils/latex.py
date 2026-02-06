@@ -1,10 +1,17 @@
 import re
 
 
-def escape_latex(text: str) -> str:
+def escape_latex(text) -> str:
     """Escape special LaTeX characters."""
     if not text:
         return ""
+    
+    # Handle lists by joining them
+    if isinstance(text, list):
+        text = ", ".join(str(item) for item in text)
+    
+    # Ensure it's a string
+    text = str(text)
     
     # Characters that need escaping in LaTeX
     replacements = [
@@ -28,7 +35,7 @@ def escape_latex(text: str) -> str:
 
 def generate_experience_entry(exp: dict) -> str:
     """Generate LaTeX for a single experience entry."""
-    title = exp.get('title', '')
+    title = exp.get('title') or exp.get('role', '')
     company = exp.get('company', '')
     location = exp.get('location', '')
     dates = exp.get('dates', '')
@@ -67,6 +74,7 @@ def generate_project_entry(proj: dict) -> str:
     tech = proj.get('tech', '')
     bullets = proj.get('bullets', [])
     
+    # tech might be a list, escape_latex handles it
     header = f"\\resumeProjectHeading\n"
     header += f"    {{\\textbf{{{escape_latex(name)}}} $|$ \\textit{{{escape_latex(tech)}}}}} {{}}\n"
     
@@ -98,11 +106,20 @@ def generate_skills_tex(skills: dict, append: str = None) -> str:
     content += "\\small\n"
     content += "\\begin{tabular}{ @{} p{0.15\\textwidth} p{0.80\\textwidth} @{} }\n"
     
+    # Handle case where skills might have 'skills' key inside
+    if 'skills' in skills and isinstance(skills['skills'], dict):
+        skills = skills['skills']
+    
+    # Filter out non-skill keys like 'tags'
+    skip_keys = {'tags', 'type', 'key', 'flavor', 'version'}
+    
     for category, items in skills.items():
+        if category in skip_keys:
+            continue
         if isinstance(items, list):
-            items_str = ", ".join(items) + "."
+            items_str = ", ".join(str(item) for item in items) + "."
         else:
-            items_str = items
+            items_str = str(items)
         content += f"    \\textbf{{{escape_latex(category)}:}} & {escape_latex(items_str)}\\\\\n"
     
     if append:
@@ -112,25 +129,61 @@ def generate_skills_tex(skills: dict, append: str = None) -> str:
     return content
 
 
-def generate_heading_tex(heading: dict) -> str:
-    """Generate heading.tex content."""
-    name = heading.get('name', '')
-    location = heading.get('location', '')
-    phone = heading.get('phone', '')
-    email = heading.get('email', '')
-    linkedin = heading.get('linkedin', '')
-    github = heading.get('github', '')
+# Default heading values (your static info)
+DEFAULT_HEADING = {
+    "name": "Shivang Patel",
+    "location": "Seattle, WA",
+    "phone": "+18575449579",
+    "phone_display": "(857)-544-9579",
+    "email": "patelshivang.work@gmail.com",
+    "linkedin": "shivangmpatel",
+    "github": "shivang2402",
+}
+
+
+def generate_heading_tex(heading: dict = None, location: str = None, email: str = None) -> str:
+    """
+    Generate heading.tex content.
+    
+    Args:
+        heading: Optional dict with heading fields (name, phone, linkedin, github, etc.)
+        location: Optional location override from location section
+        email: Optional email override from email section
+    
+    Location and email overrides take precedence over heading dict values.
+    """
+    # Start with defaults
+    h = DEFAULT_HEADING.copy()
+    
+    # Override with heading dict if provided
+    if heading:
+        h.update({k: v for k, v in heading.items() if v})
+    
+    # Override with location/email sections if provided
+    if location:
+        h["location"] = location
+    if email:
+        h["email"] = email
+    
+    # Get display values
+    name = h.get("name", "")
+    loc = h.get("location", "")
+    phone = h.get("phone", "")
+    phone_display = h.get("phone_display", phone)
+    email_addr = h.get("email", "")
+    linkedin = h.get("linkedin", "")
+    github = h.get("github", "")
     
     content = "%----------HEADING----------%\n"
     content += "\\begin{center}\n"
     content += f"    \\textbf{{\\huge {escape_latex(name)}}} \\\\ \\vspace{{3pt}}\n"
     content += "    \n"
     content += "    \\quad\n"
-    content += f"    {{\\seticon{{faMapMarker}} \\underline{{{escape_latex(location)}}}}}\n"
+    content += f"    {{\\seticon{{faMapMarker}} \\underline{{{escape_latex(loc)}}}}}\n"
     content += "    \\quad\n"
-    content += f"    \\href{{tel:{phone}}}{{\\seticon{{faPhone}} \\underline{{{escape_latex(phone)}}}}}\n"
+    content += f"    \\href{{tel:{phone}}}{{\\seticon{{faPhone}} \\underline{{{escape_latex(phone_display)}}}}}\n"
     content += "    \\quad\n"
-    content += f"    \\href{{mailto:{email}}}{{\\seticon{{faEnvelope}} \\underline{{{escape_latex(email)}}}}}\n"
+    content += f"    \\href{{mailto:{email_addr}}}{{\\seticon{{faEnvelope}} \\underline{{{escape_latex(email_addr)}}}}}\n"
     content += "    \\quad\n"
     content += f"    \\href{{https://www.linkedin.com/in/{linkedin}}}{{\\seticon{{faLinkedin}} \\underline{{{escape_latex(linkedin)}}}}}\n"
     content += "    \\quad\n"

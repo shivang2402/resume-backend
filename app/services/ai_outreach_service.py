@@ -27,7 +27,6 @@ class AIOutreachService:
     def _fetch_resume_context(db: Session, user_id: UUID, resume_config: Optional[dict] = None) -> str:
         """Fetch user's resume sections and format as context."""
         if resume_config:
-            # Fetch specific sections from resume_config
             context_parts = []
             
             for section_type, refs in resume_config.items():
@@ -38,7 +37,7 @@ class AIOutreachService:
                             key, flavor, version = parts[0], parts[1], parts[2]
                             section = db.query(Section).filter(
                                 Section.user_id == user_id,
-                                Section.type == section_type.rstrip('s'),  # experiences -> experience
+                                Section.type == section_type.rstrip('s'),
                                 Section.key == key,
                                 Section.flavor == flavor,
                                 Section.version == version
@@ -60,7 +59,6 @@ class AIOutreachService:
             
             return "\n\n".join(context_parts) if context_parts else ""
         else:
-            # Fetch all current sections
             sections = db.query(Section).filter(
                 Section.user_id == user_id,
                 Section.is_current == True
@@ -165,7 +163,6 @@ class AIOutreachService:
     ) -> str:
         """Generate an initial outreach message."""
         
-        # Fetch template
         template = db.query(OutreachTemplate).filter(
             OutreachTemplate.id == template_id,
             OutreachTemplate.user_id == user_id
@@ -174,10 +171,8 @@ class AIOutreachService:
         if not template:
             raise HTTPException(status_code=404, detail="Template not found")
         
-        # Fetch resume context
         resume_context = cls._fetch_resume_context(db, user_id, resume_config)
         
-        # Build prompt
         prompt = cls._build_generation_prompt(
             template_content=template.content,
             style=template.style,
@@ -187,101 +182,6 @@ class AIOutreachService:
             resume_context=resume_context,
             additional_context=additional_context
         )
-        
-        # Call Gemini
-        model = cls._get_gemini_client(api_key)
-        response = model.generate_content(prompt)
-        
-        return response.text.strip()
-
-    @classmethod
-    def generate_reply(
-        cls,
-        db: Session,
-        user_id: UUID,
-        thread_id: UUID,
-        received_message: str,
-        style: str = "professional",
-        length: str = "short",
-        additional_instructions: Optional[str] = None,
-        api_key: Optional[str] = None
-    ) -> str:
-        """Generate a reply based on conversation history."""
-        
-        # Verify thread ownership
-        thread = db.query(OutreachThread).filter(
-            OutreachThread.id == thread_id,
-            OutreachThread.user_id == user_id
-        ).first()
-        
-        if not thread:
-            raise HTTPException(status_code=404, detail="Thread not found")
-        
-        # Fetch conversation history
-        history = cls._fetch_thread_history(db, thread_id)
-        
-        # Fetch resume context
-        resume_context = cls._fetch_resume_context(db, user_id, thread.resume_config)
-        
-        prompt = f"""You are helping craft a reply to a cold outreach conversation.
-
-**CONVERSATION HISTORY:**
-{history}
-
-**NEW MESSAGE FROM THEM:**
-{received_message}
-
-**YOUR BACKGROUND:**
-{resume_context}
-
-**STYLE:** {style}
-**LENGTH:** {length}
-
-"""
-        
-        if additional_instructions:
-            prompt += f"""**ADDITIONAL INSTRUCTIONS:**
-{additional_instructions}
-
-"""
-        
-        prompt += """**INSTRUCTIONS:**
-1. Write a thoughtful reply that continues the conversation naturally
-2. Reference relevant parts of your background if appropriate
-3. Be helpful and move the conversation toward your goal (getting a referral, interview, etc.)
-4. Match the tone and energy of their message while staying within your style setting
-5. Output ONLY the reply text, no explanations
-
-**GENERATE THE REPLY:**"""
-        
-        model = cls._get_gemini_client(api_key)
-        response = model.generate_content(prompt)
-        
-        return response.text.strip()
-
-    @classmethod
-    def refine_message(
-        cls,
-        original_message: str,
-        refinement_instructions: str,
-        api_key: Optional[str] = None
-    ) -> str:
-        """Refine an existing message based on user feedback."""
-        
-        prompt = f"""You are helping refine a cold outreach message.
-
-**ORIGINAL MESSAGE:**
-{original_message}
-
-**REFINEMENT INSTRUCTIONS:**
-{refinement_instructions}
-
-**INSTRUCTIONS:**
-1. Apply the refinement instructions to improve the message
-2. Keep the core intent and structure unless specifically asked to change it
-3. Output ONLY the refined message, no explanations
-
-**REFINED MESSAGE:**"""
         
         model = cls._get_gemini_client(api_key)
         response = model.generate_content(prompt)
@@ -325,7 +225,6 @@ class AIOutreachService:
         response = model.generate_content(prompt)
         refined = response.text.strip()
         
-        # Enforce char limit for short messages
         if length == "short" and len(refined) > 300:
             refined = refined[:297] + "..."
         
@@ -352,9 +251,10 @@ class AIOutreachService:
 {raw_text}
 
 **INSTRUCTIONS:**
-- Look for patterns like "Me:", "Them:", timestamps, or indentation to determine direction
-- If you see names, the first message sender is usually "sent" (the user reaching out)
-- Clean up the message content (remove leading timestamps, names, etc.)
+- Look for patterns like "Me:", "Them:", "SENT", "RECEIVED", timestamps, or indentation to determine direction
+- Messages marked "SENT" are from the user (direction: "sent")
+- Messages marked "RECEIVED" are from the contact (direction: "received")
+- Clean up the message content (remove leading timestamps, direction labels, etc.)
 - If no clear timestamp, set message_at to null
 
 **RESPOND IN THIS EXACT JSON FORMAT (no markdown, no code blocks):**
@@ -367,7 +267,6 @@ If you cannot parse the conversation at all, respond with:
             model = cls._get_gemini_client(api_key)
             response = model.generate_content(prompt)
             
-            # Clean up response (remove markdown code blocks if present)
             response_text = response.text.strip()
             if response_text.startswith("```"):
                 response_text = response_text.split("```")[1]
@@ -384,7 +283,6 @@ If you cannot parse the conversation at all, respond with:
                     "raw_fallback": raw_text
                 }
             
-            # Convert to proper format
             parsed_messages = []
             for m in result.get("messages", []):
                 parsed_messages.append({
@@ -400,7 +298,6 @@ If you cannot parse the conversation at all, respond with:
             }
             
         except Exception as e:
-            # If parsing fails, return raw fallback
             return {
                 "success": False,
                 "messages": [],
@@ -433,7 +330,7 @@ If you cannot parse the conversation at all, respond with:
         if not thread:
             raise HTTPException(status_code=404, detail="Thread not found")
         
-        # Get all messages in the thread
+        # Get all messages in the thread, ordered by time
         messages = db.query(OutreachMessage).filter(
             OutreachMessage.thread_id == thread_id
         ).order_by(OutreachMessage.message_at.asc().nullsfirst(), OutreachMessage.created_at.asc()).all()
@@ -441,10 +338,28 @@ If you cannot parse the conversation at all, respond with:
         if not messages:
             raise HTTPException(status_code=400, detail="Thread has no messages to reply to")
         
-        # Build conversation history
+        # Find the last received message (this is what we're replying to)
+        last_received = None
+        for msg in reversed(messages):
+            if msg.direction == "received":
+                last_received = msg
+                break
+        
+        # Find the last sent message (for context on where we left off)
+        last_sent = None
+        for msg in reversed(messages):
+            if msg.direction == "sent":
+                last_sent = msg
+                break
+        
+        # Build conversation history (last 10 messages for context)
+        recent_messages = messages[-10:] if len(messages) > 10 else messages
         history_lines = []
-        for msg in messages:
-            direction_label = "ME" if msg.direction == "sent" else "THEM"
+        for msg in recent_messages:
+            if msg.direction == "sent":
+                direction_label = "ME (you - the job seeker)"
+            else:
+                direction_label = f"THEM ({thread.contact_name or 'contact'} at {thread.company})"
             history_lines.append(f"[{direction_label}]: {msg.content}")
         history = "\n\n".join(history_lines)
         
@@ -466,16 +381,44 @@ If you cannot parse the conversation at all, respond with:
         
         char_limit = 300 if length == "short" else 600
         
-        prompt = f"""You are helping write a reply in an ongoing job-related conversation.
+        # Determine conversation state
+        if last_received and last_sent:
+            if messages[-1].direction == "received":
+                conv_state = "They sent the last message. You need to reply to them."
+            else:
+                conv_state = "You sent the last message. You may be following up since they haven't replied."
+        elif last_received and not last_sent:
+            conv_state = "They reached out first. This is your first reply to them."
+        elif last_sent and not last_received:
+            conv_state = "You reached out first and are following up."
+        else:
+            conv_state = "Starting a new conversation."
+        
+        prompt = f"""You are helping write a reply in an ongoing job-related LinkedIn conversation.
 
-**CONVERSATION HISTORY:**
+**CONTACT:** {thread.contact_name or 'Unknown'} at {thread.company}
+
+**CONVERSATION STATE:** {conv_state}
+
+**RECENT CONVERSATION HISTORY (oldest to newest):**
 {history}
 
-**YOUR BACKGROUND:**
-{resume_context}
+"""
+        
+        if last_received:
+            prompt += f"""**THE LAST MESSAGE FROM THEM (this is what you're replying to):**
+{last_received.content[:500]}{'...' if len(last_received.content) > 500 else ''}
 
-**COMPANY:** {thread.company}
-**CONTACT:** {thread.contact_name or 'Unknown'}
+"""
+        
+        if last_sent:
+            prompt += f"""**YOUR LAST MESSAGE (for context):**
+{last_sent.content[:300]}{'...' if len(last_sent.content) > 300 else ''}
+
+"""
+        
+        prompt += f"""**YOUR BACKGROUND:**
+{resume_context}
 
 **STYLE:** {style_instructions.get(style, 'professional but approachable')}
 **MAX LENGTH:** {char_limit} characters
@@ -489,12 +432,13 @@ If you cannot parse the conversation at all, respond with:
 """
         
         prompt += """**INSTRUCTIONS:**
-1. Write a natural reply that continues the conversation
-2. Reference your background if relevant to what they asked
+1. Write a natural reply that responds to their last message
+2. Reference your background ONLY if relevant to what they said
 3. Be helpful and move toward your goal (getting a referral, interview, info)
-4. Match the conversation's energy while staying within your style
-5. Keep it concise and actionable
-6. Output ONLY the reply text, no explanations or preamble
+4. If they shared a job posting, express genuine interest and ask a relevant question
+5. If they asked a question, answer it directly
+6. Keep it concise and end with a clear next step or question
+7. Output ONLY the reply text, no explanations or preamble
 
 **YOUR REPLY:**"""
         
@@ -502,7 +446,6 @@ If you cannot parse the conversation at all, respond with:
         response = model.generate_content(prompt)
         reply = response.text.strip()
         
-        # Enforce char limit for short messages
         if length == "short" and len(reply) > 300:
             reply = reply[:297] + "..."
         
@@ -528,7 +471,6 @@ If you cannot parse the conversation at all, respond with:
         """Generate a cold outreach message."""
         from app.models.application import Application
         
-        # Get template content if provided
         template_content = ""
         if template_id:
             template = db.query(OutreachTemplate).filter(
@@ -540,7 +482,6 @@ If you cannot parse the conversation at all, respond with:
                 style = template.style
                 length = template.length
         
-        # Get application context if provided
         app_context = ""
         if application_id:
             app = db.query(Application).filter(
@@ -552,10 +493,8 @@ If you cannot parse the conversation at all, respond with:
                 if app.job_url:
                     app_context += f"\nJob URL: {app.job_url}"
         
-        # Get resume context
         resume_context = cls._fetch_resume_context(db, user_id)
         
-        # Build prompt
         char_limit = 300 if length == "short" else 600
         
         style_guidance = {
@@ -614,7 +553,6 @@ If you cannot parse the conversation at all, respond with:
         response = model.generate_content(prompt)
         message = response.text.strip()
         
-        # Enforce char limit for short messages
         if length == "short" and len(message) > 300:
             message = message[:297] + "..."
         

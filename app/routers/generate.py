@@ -18,7 +18,9 @@ router = APIRouter()
 class GenerateRequest(BaseModel):
     resume_config: dict
     # Optional: create application record
-    job: Optional[dict] = None  # {company, role, location, job_url, job_id}
+    job: Optional[dict] = None
+    temp_edits: Optional[dict] = None
+    temp_edits: Optional[dict] = None  # {company, role, location, job_url, job_id}
 
 
 class GenerateResponse(BaseModel):

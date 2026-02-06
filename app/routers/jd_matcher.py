@@ -1,23 +1,19 @@
+"""
+JD Matcher - Unified router with tag-based matching.
+Uses pre-computed tags for fast matching (2 AI calls).
+"""
+
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 import uuid
 
 from app.database import get_db
 from app.models.section import Section
 from app.models.section_config import SectionConfig
-from app.services.gemini_service import (
-    analyze_jd_with_gemini,
-    GeminiError,
-    GeminiAuthError,
-    GeminiRateLimitError
-)
-from app.services.keyword_service import (
-    find_missing_keywords_with_ai,
-    sections_to_text,
-    content_to_text,
-    KeywordServiceError
-)
+from app.services.jd_extractor import extract_jd_terms
+from app.services.jd_matcher_service import match_sections_to_jd
+from app.services.keyword_service import find_missing_keywords_with_ai, sections_to_text
 from app.schemas.jd_matcher import (
     JDAnalyzeRequest,
     JDAnalyzeResponse,
@@ -33,28 +29,24 @@ from app.schemas.jd_matcher import (
 
 router = APIRouter()
 
-def get_user_id(x_user_id: str = Header(...)) -> uuid.UUID:
-    """Extract user ID from header."""
+
+def get_user_id(x_user_id: str = Header(..., alias="X-User-ID")) -> uuid.UUID:
     try:
         return uuid.UUID(x_user_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid user ID format")
 
-def get_user_sections(db: Session, user_id: uuid.UUID) -> Dict[str, List]:
-    """Fetch all current sections grouped by type."""
+
+def get_sections_with_tags(db: Session, user_id: uuid.UUID) -> Dict[str, List]:
+    """Fetch sections with their pre-computed tags."""
     sections = db.query(Section).filter(
         Section.user_id == user_id,
         Section.is_current == True
     ).all()
     
-    grouped = {
-        'experiences': [],
-        'projects': [],
-        'skills': []
-    }
-    
-    # Group by type and key
+    grouped = {'experiences': [], 'projects': [], 'skills': []}
     by_type_key = {}
+    
     for s in sections:
         type_key = (s.type, s.key)
         if type_key not in by_type_key:
@@ -63,174 +55,70 @@ def get_user_sections(db: Session, user_id: uuid.UUID) -> Dict[str, List]:
     
     for (section_type, key), section_list in by_type_key.items():
         if section_type == 'experience':
-            flavors = []
-            for s in section_list:
-                content_summary = summarize_content(s.content)
-                flavors.append({
-                    'flavor': s.flavor,
-                    'version': s.version,
-                    'content_summary': content_summary,
-                    'content': s.content
-                })
-            grouped['experiences'].append({
-                'key': key,
-                'flavors': flavors
-            })
+            flavors = [{'flavor': s.flavor, 'version': s.version, 'tags': s.content.get('tags', []), 'content': s.content} for s in section_list]
+            grouped['experiences'].append({'key': key, 'flavors': flavors})
         elif section_type == 'project':
-            flavors = []
-            for s in section_list:
-                content_summary = summarize_content(s.content)
-                flavors.append({
-                    'flavor': s.flavor,
-                    'version': s.version,
-                    'content_summary': content_summary,
-                    'content': s.content
-                })
-            grouped['projects'].append({
-                'key': key,
-                'flavors': flavors
-            })
+            flavors = [{'flavor': s.flavor, 'version': s.version, 'tags': s.content.get('tags', []), 'content': s.content} for s in section_list]
+            grouped['projects'].append({'key': key, 'flavors': flavors})
         elif section_type == 'skills':
             for s in section_list:
-                content_summary = summarize_content(s.content)
-                grouped['skills'].append({
-                    'flavor': s.flavor,
-                    'version': s.version,
-                    'content_summary': content_summary,
-                    'content': s.content
-                })
+                grouped['skills'].append({'flavor': s.flavor, 'version': s.version, 'tags': s.content.get('tags', []), 'content': s.content})
     
     return grouped
 
-def summarize_content(content: Dict) -> str:
-    """Create a BRIEF summary of section content for the prompt (token-efficient)."""
-    parts = []
-    if 'title' in content or 'role' in content:
-        parts.append(content.get('title') or content.get('role', ''))
-    if 'company' in content:
-        parts.append(content['company'])
-    if 'bullets' in content and content['bullets']:
-        # Only first bullet, max 50 chars
-        first = content['bullets'][0][:50]
-        parts.append(first + "..." if len(content['bullets'][0]) > 50 else first)
-    if 'skills' in content:
-        if isinstance(content['skills'], dict):
-            # Just category names
-            parts.append(f"Categories: {', '.join(list(content['skills'].keys())[:3])}")
-        elif isinstance(content['skills'], list):
-            parts.append(', '.join(content['skills'][:5]))
-    if 'name' in content:
-        parts.append(content['name'])
-    if 'tech' in content or 'tech_stack' in content:
-        tech = content.get('tech') or content.get('tech_stack', [])
-        if isinstance(tech, list):
-            parts.append(', '.join(tech[:4]))
-        else:
-            parts.append(tech[:30])
-    return ' | '.join(parts) if parts else 'No content'
 
 def get_section_configs_map(db: Session, user_id: uuid.UUID) -> Dict[str, Dict]:
-    """Get section configs as a map keyed by type:key."""
-    configs = db.query(SectionConfig).filter(
-        SectionConfig.user_id == user_id
-    ).all()
-    
-    return {
-        f"{c.section_type}:{c.section_key}": {
-            'priority': c.priority,
-            'fixed_flavor': c.fixed_flavor
-        }
-        for c in configs
-    }
+    configs = db.query(SectionConfig).filter(SectionConfig.user_id == user_id).all()
+    return {f"{c.section_type}:{c.section_key}": {'priority': c.priority, 'fixed_flavor': c.fixed_flavor} for c in configs}
+
 
 def filter_by_priority(sections: Dict[str, List], configs: Dict[str, Dict]) -> Dict[str, List]:
-    """Filter out sections with priority='never'."""
-    filtered = {
-        'experiences': [],
-        'projects': [],
-        'skills': []
-    }
-    
+    filtered = {'experiences': [], 'projects': [], 'skills': sections['skills']}
     for exp in sections['experiences']:
-        config_key = f"experience:{exp['key']}"
-        config = configs.get(config_key, {'priority': 'normal'})
+        config = configs.get(f"experience:{exp['key']}", {'priority': 'normal'})
         if config['priority'] != 'never':
             filtered['experiences'].append(exp)
-    
     for proj in sections['projects']:
-        config_key = f"project:{proj['key']}"
-        config = configs.get(config_key, {'priority': 'normal'})
+        config = configs.get(f"project:{proj['key']}", {'priority': 'normal'})
         if config['priority'] != 'never':
             filtered['projects'].append(proj)
-    
-    # Skills don't get filtered the same way
-    filtered['skills'] = sections['skills']
-    
     return filtered
 
+
 def get_pinned_sections(sections: Dict[str, List], configs: Dict[str, Dict]) -> List[Dict]:
-    """Get sections with priority='always'."""
     pinned = []
-    
     for exp in sections['experiences']:
-        config_key = f"experience:{exp['key']}"
-        config = configs.get(config_key, {'priority': 'normal'})
+        config = configs.get(f"experience:{exp['key']}", {'priority': 'normal'})
         if config['priority'] == 'always':
-            pinned.append({
-                'type': 'experience',
-                'key': exp['key'],
-                'flavor': config['fixed_flavor']
-            })
-    
+            pinned.append({'type': 'experience', 'key': exp['key'], 'flavor': config.get('fixed_flavor')})
     for proj in sections['projects']:
-        config_key = f"project:{proj['key']}"
-        config = configs.get(config_key, {'priority': 'normal'})
+        config = configs.get(f"project:{proj['key']}", {'priority': 'normal'})
         if config['priority'] == 'always':
-            pinned.append({
-                'type': 'project',
-                'key': proj['key'],
-                'flavor': config['fixed_flavor']
-            })
-    
+            pinned.append({'type': 'project', 'key': proj['key'], 'flavor': config.get('fixed_flavor')})
     return pinned
 
+
 def build_all_sections_response(sections: Dict[str, List], configs: Dict[str, Dict]) -> AllSections:
-    """Build response object with all sections for UI."""
-    experiences = []
-    for exp in sections['experiences']:
-        config_key = f"experience:{exp['key']}"
-        config = configs.get(config_key, {'priority': 'normal', 'fixed_flavor': None})
-        experiences.append(AllSectionInfo(
-            key=exp['key'],
-            flavors=[FlavorInfo(flavor=f['flavor'], version=f['version']) for f in exp['flavors']],
-            priority=config['priority'],
-            fixed_flavor=config.get('fixed_flavor')
-        ))
+    experiences = [AllSectionInfo(
+        key=exp['key'],
+        flavors=[FlavorInfo(flavor=f['flavor'], version=f['version']) for f in exp['flavors']],
+        priority=configs.get(f"experience:{exp['key']}", {'priority': 'normal'})['priority'],
+        fixed_flavor=configs.get(f"experience:{exp['key']}", {}).get('fixed_flavor')
+    ) for exp in sections['experiences']]
     
-    projects = []
-    for proj in sections['projects']:
-        config_key = f"project:{proj['key']}"
-        config = configs.get(config_key, {'priority': 'normal', 'fixed_flavor': None})
-        projects.append(AllSectionInfo(
-            key=proj['key'],
-            flavors=[FlavorInfo(flavor=f['flavor'], version=f['version']) for f in proj['flavors']],
-            priority=config['priority'],
-            fixed_flavor=config.get('fixed_flavor')
-        ))
+    projects = [AllSectionInfo(
+        key=proj['key'],
+        flavors=[FlavorInfo(flavor=f['flavor'], version=f['version']) for f in proj['flavors']],
+        priority=configs.get(f"project:{proj['key']}", {'priority': 'normal'})['priority'],
+        fixed_flavor=configs.get(f"project:{proj['key']}", {}).get('fixed_flavor')
+    ) for proj in sections['projects']]
     
-    skills = [
-        SkillsInfo(flavor=s['flavor'], version=s['version'])
-        for s in sections['skills']
-    ]
+    skills = [SkillsInfo(flavor=s['flavor'], version=s['version']) for s in sections['skills']]
     
-    return AllSections(
-        experiences=experiences,
-        projects=projects,
-        skills=skills
-    )
+    return AllSections(experiences=experiences, projects=projects, skills=skills)
+
 
 def get_version_for_section(sections: Dict[str, List], section_type: str, key: str, flavor: str) -> str:
-    """Look up version for a section."""
     type_key = 'experiences' if section_type == 'experience' else 'projects'
     for item in sections.get(type_key, []):
         if item['key'] == key:
@@ -239,102 +127,87 @@ def get_version_for_section(sections: Dict[str, List], section_type: str, key: s
                     return f['version']
     return '1.0'
 
-@router.post("/analyze", response_model=JDAnalyzeResponse)
+
+@router.post("/analyze")
 async def analyze_jd(
     request: JDAnalyzeRequest,
     x_gemini_api_key: str = Header(..., alias="X-Gemini-API-Key"),
     user_id: uuid.UUID = Depends(get_user_id),
     db: Session = Depends(get_db)
 ):
-    """Analyze JD with Gemini and return suggestions."""
+    """Analyze JD using pre-computed tags. 2 AI calls, ~500-700 tokens."""
     
-    # Validate API key format
     if not x_gemini_api_key or len(x_gemini_api_key) < 20:
         raise HTTPException(status_code=400, detail="Invalid Gemini API key")
     
-    # Fetch user's sections
-    sections = get_user_sections(db, user_id)
+    sections = get_sections_with_tags(db, user_id)
     
-    # Check if user has any content
     if not sections['experiences'] and not sections['projects'] and not sections['skills']:
-        raise HTTPException(
-            status_code=400, 
-            detail="No content found. Please add sections to your Content Library first."
-        )
+        raise HTTPException(status_code=400, detail="No content found. Add sections first.")
     
-    # Fetch section configs
     configs = get_section_configs_map(db, user_id)
-    
-    # Filter out 'never' priority sections
     filtered_sections = filter_by_priority(sections, configs)
-    
-    # Get pinned sections (priority='always')
     pinned_sections = get_pinned_sections(sections, configs)
     
-    # Call Gemini
+    # AI Call 1: Extract JD terms
+    jd_extracted = await extract_jd_terms(x_gemini_api_key, request.job_description)
+    jd_terms = jd_extracted.get('terms', [])
+    
+    if request.additional_instructions:
+        jd_terms.append(f"Note: {request.additional_instructions}")
+    
+    # AI Call 2: Match sections
     try:
-        result = await analyze_jd_with_gemini(
+        match_result = await match_sections_to_jd(
             api_key=x_gemini_api_key,
-            job_description=request.job_description,
-            additional_instructions=request.additional_instructions,
-            sections=filtered_sections,
+            jd_terms=jd_terms,
+            jd_info=jd_extracted,
+            sections_with_tags=filtered_sections,
             pinned_sections=pinned_sections
         )
-    except GeminiAuthError:
-        raise HTTPException(status_code=401, detail="Invalid Gemini API key")
-    except GeminiRateLimitError:
-        raise HTTPException(status_code=429, detail="Gemini rate limit exceeded. Try again later.")
-    except GeminiError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-    # Build suggestions with versions
-    experience_suggestions = []
-    for exp in result.get('experiences', []):
-        version = get_version_for_section(sections, 'experience', exp['key'], exp['flavor'])
-        is_pinned = any(p['key'] == exp['key'] for p in pinned_sections)
-        experience_suggestions.append(SectionSuggestion(
-            key=exp['key'],
-            flavor=exp['flavor'],
-            version=version,
-            pinned=is_pinned
-        ))
-    
-    project_suggestions = []
-    for proj in result.get('projects', []):
-        version = get_version_for_section(sections, 'project', proj['key'], proj['flavor'])
-        is_pinned = any(p['key'] == proj['key'] for p in pinned_sections)
-        project_suggestions.append(SectionSuggestion(
-            key=proj['key'],
-            flavor=proj['flavor'],
-            version=version,
-            pinned=is_pinned
-        ))
-    
-    suggestions = Suggestions(
-        skills_flavor=result.get('skills_flavor', 'default'),
-        experiences=experience_suggestions,
-        projects=project_suggestions
-    )
+    except Exception as e:
+        error_msg = str(e)
+        if "429" in error_msg or "Resource exhausted" in error_msg:
+            raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait a moment and try again.")
+        raise HTTPException(status_code=500, detail=f"AI matching failed: {error_msg}")
     
     # Build response
-    return JDAnalyzeResponse(
-        suggestions=suggestions,
-        missing_keywords=result.get('missing_keywords', []),
-        all_sections=build_all_sections_response(sections, configs)
-    )
+    exp_suggestions = [SectionSuggestion(
+        key=e['key'],
+        flavor=e['flavor'],
+        version=get_version_for_section(sections, 'experience', e['key'], e['flavor']),
+        pinned=any(p['key'] == e['key'] for p in pinned_sections),
+        reason=e.get('reason', '')
+    ) for e in match_result.get('experiences', [])]
+    
+    proj_suggestions = [SectionSuggestion(
+        key=p['key'],
+        flavor=p['flavor'],
+        version=get_version_for_section(sections, 'project', p['key'], p['flavor']),
+        pinned=any(pin['key'] == p['key'] for pin in pinned_sections),
+        reason=p.get('reason', '')
+    ) for p in match_result.get('projects', [])]
+    
+    return {
+        "suggestions": {
+            "skills_flavor": match_result.get('skills_flavor', 'default'),
+            "experiences": exp_suggestions,
+            "projects": proj_suggestions
+        },
+        "missing_keywords": match_result.get('missing_keywords', []),
+        "all_sections": build_all_sections_response(sections, configs),
+        "jd_info": jd_extracted
+    }
+
 
 @router.post("/recalculate-keywords", response_model=KeywordRecalcResponse)
 async def recalculate_keywords(
     request: KeywordRecalcRequest,
-    x_gemini_api_key: str = Header(..., alias="X-Gemini-API-Key"),
+    x_gemini_api_key: str = Header(None, alias="X-Gemini-API-Key"),
     user_id: uuid.UUID = Depends(get_user_id),
     db: Session = Depends(get_db)
 ):
-    """Recalculate missing keywords based on current selection using AI."""
-    
-    # Validate API key
-    if not x_gemini_api_key or len(x_gemini_api_key) < 20:
-        raise HTTPException(status_code=400, detail="Invalid Gemini API key")
+    """Recalculate missing keywords based on current selection. No full Gemini call."""
     
     # Get selected sections content
     selected_content = []
@@ -352,19 +225,22 @@ async def recalculate_keywords(
     # Apply temp edits if any
     if request.temp_edits:
         for section_id, edit in request.temp_edits.items():
-            selected_content.append(edit.content.model_dump())
+            if hasattr(edit, 'content'):
+                selected_content.append(edit.content if isinstance(edit.content, dict) else edit.content.model_dump())
     
-    # Convert to text for AI analysis
+    # Convert to text
     resume_text = sections_to_text(selected_content)
     
-    # Use AI to find missing keywords
-    try:
+    # Find missing keywords (uses simpler matching or AI if key provided)
+    if x_gemini_api_key:
         missing = await find_missing_keywords_with_ai(
             api_key=x_gemini_api_key,
             job_description=request.job_description,
             resume_content=resume_text
         )
-    except KeywordServiceError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    else:
+        # Fallback: simple keyword extraction without AI
+        from app.services.keyword_service import find_missing_keywords_simple
+        missing = find_missing_keywords_simple(request.job_description, resume_text)
     
     return KeywordRecalcResponse(missing_keywords=missing)
