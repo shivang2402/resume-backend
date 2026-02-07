@@ -21,7 +21,7 @@ class AIOutreachService:
         if not key:
             raise HTTPException(status_code=400, detail="Gemini API key not configured")
         genai.configure(api_key=key)
-        return genai.GenerativeModel('gemini-2.5-flash')
+        return genai.GenerativeModel('gemini-2.0-flash')
 
     @staticmethod
     def _fetch_resume_context(db: Session, user_id: UUID, resume_config: Optional[dict] = None) -> str:

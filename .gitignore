@@ -49,3 +49,6 @@ build/
 *.out
 *.synctex.gz
 templates/*.pdf
+
+
+1.py
