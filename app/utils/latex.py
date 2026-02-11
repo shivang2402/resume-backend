@@ -33,6 +33,61 @@ def escape_latex(text) -> str:
     return text
 
 
+def process_bullet(text: str) -> str:
+    """
+    Process a bullet point: convert markdown bold/italic to LaTeX,
+    then escape special characters in the non-formatted parts.
+    
+    Supports:
+        **bold text** -> \\textbf{bold text}
+        *italic text* -> \\textit{italic text}
+    """
+    if not text:
+        return ""
+    
+    if not isinstance(text, str):
+        text = str(text)
+    
+    # Split text into segments: markdown-formatted and plain text.
+    # We process bold first (**...**), then italic (*...*).
+    # 
+    # Strategy: find all **bold** and *italic* spans, escape the plain
+    # text between them, and wrap the formatted spans in LaTeX commands.
+    
+    result = []
+    i = 0
+    
+    while i < len(text):
+        # Check for bold: **...**
+        if text[i:i+2] == '**':
+            end = text.find('**', i + 2)
+            if end != -1:
+                inner = escape_latex(text[i+2:end])
+                result.append(f'\\textbf{{{inner}}}')
+                i = end + 2
+                continue
+        
+        # Check for italic: *...*
+        if text[i] == '*':
+            end = text.find('*', i + 1)
+            if end != -1:
+                inner = escape_latex(text[i+1:end])
+                result.append(f'\\textit{{{inner}}}')
+                i = end + 1
+                continue
+        
+        # Plain text: collect until next * 
+        next_star = text.find('*', i)
+        if next_star == -1:
+            result.append(escape_latex(text[i:]))
+            break
+        else:
+            result.append(escape_latex(text[i:next_star]))
+            i = next_star
+    
+    return ''.join(result)
+
+
 def generate_experience_entry(exp: dict) -> str:
     """Generate LaTeX for a single experience entry."""
     title = exp.get('title') or exp.get('role', '')
@@ -48,7 +103,7 @@ def generate_experience_entry(exp: dict) -> str:
     # Build bullets
     items = "\\resumeItemListStart\n"
     for bullet in bullets:
-        items += f"    \\resumeItem{{{escape_latex(bullet)}}}\n"
+        items += f"    \\resumeItem{{{process_bullet(bullet)}}}\n"
     items += "\\resumeItemListEnd\n"
     
     return header + items
@@ -80,7 +135,7 @@ def generate_project_entry(proj: dict) -> str:
     
     items = "\\resumeItemListStart\n"
     for bullet in bullets:
-        items += f"    \\resumeItem{{{escape_latex(bullet)}}}\n"
+        items += f"    \\resumeItem{{{process_bullet(bullet)}}}\n"
     items += "\\resumeItemListEnd\n"
     
     return header + items
