@@ -13,8 +13,9 @@ from app.models.outreach_thread import OutreachThread
 from app.models.outreach_message import OutreachMessage
 from app.models.todo import Todo
 from app.models.contact import Contact
+from app.models.resume_preset import ResumePreset
 
-from app.routers import auth, sections, applications, generate, ai, outreach, section_configs, jd_matcher, todos, contacts
+from app.routers import auth, sections, applications, generate, ai, outreach, section_configs, jd_matcher, todos, contacts, resume_presets
 
 Base.metadata.create_all(bind=engine)
 
@@ -42,6 +43,7 @@ app.include_router(section_configs.router, prefix="/api/section-configs", tags=[
 app.include_router(jd_matcher.router, prefix="/api/jd", tags=["jd-matcher"])
 app.include_router(todos.router, prefix="/api/todos", tags=["todos"])
 app.include_router(contacts.router, prefix="/api/contacts", tags=["contacts"])
+app.include_router(resume_presets.router, prefix="/api/resume-presets", tags=["resume-presets"])
 
 
 @app.get("/health")
