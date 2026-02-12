@@ -128,16 +128,26 @@ def generate_project_entry(proj: dict) -> str:
     name = proj.get('name', '')
     tech = proj.get('tech', '')
     bullets = proj.get('bullets', [])
-    
-    # tech might be a list, escape_latex handles it
+    links = proj.get('links', {})
+
+    # Build header with optional links
+    header_parts = f"\\textbf{{{escape_latex(name)}}} $|$ \\textit{{{escape_latex(tech)}}}"
+
+    if links.get('github'):
+        header_parts += f" $|$ \\href{{{links['github']}}}{{\\textbf{{GitHub}}}}"
+    if links.get('live'):
+        header_parts += f" $|$ \\href{{{links['live']}}}{{\\textbf{{Live}}}}"
+    if links.get('certificate'):
+        header_parts += f" $|$ \\href{{{links['certificate']}}}{{\\textbf{{Certificate}}}}"
+
     header = f"\\resumeProjectHeading\n"
-    header += f"    {{\\textbf{{{escape_latex(name)}}} $|$ \\textit{{{escape_latex(tech)}}}}} {{}}\n"
-    
+    header += f"    {{{header_parts}}} {{}}\n"
+
     items = "\\resumeItemListStart\n"
     for bullet in bullets:
         items += f"    \\resumeItem{{{process_bullet(bullet)}}}\n"
     items += "\\resumeItemListEnd\n"
-    
+
     return header + items
 
 
