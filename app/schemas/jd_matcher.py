@@ -20,6 +20,7 @@ class Suggestions(BaseModel):
 class FlavorInfo(BaseModel):
     flavor: str
     version: str
+    content: Optional[Dict[str, Any]] = None
 
 class AllSectionInfo(BaseModel):
     key: str

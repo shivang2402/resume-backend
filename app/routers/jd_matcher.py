@@ -101,20 +101,28 @@ def get_pinned_sections(sections: Dict[str, List], configs: Dict[str, Dict]) -> 
 def build_all_sections_response(sections: Dict[str, List], configs: Dict[str, Dict]) -> AllSections:
     experiences = [AllSectionInfo(
         key=exp['key'],
-        flavors=[FlavorInfo(flavor=f['flavor'], version=f['version']) for f in exp['flavors']],
+        flavors=[FlavorInfo(
+            flavor=f['flavor'],
+            version=f['version'],
+            content={k: v for k, v in f['content'].items() if k != 'tags'} if f.get('content') else None
+        ) for f in exp['flavors']],
         priority=configs.get(f"experience:{exp['key']}", {'priority': 'normal'})['priority'],
         fixed_flavor=configs.get(f"experience:{exp['key']}", {}).get('fixed_flavor')
     ) for exp in sections['experiences']]
-    
+
     projects = [AllSectionInfo(
         key=proj['key'],
-        flavors=[FlavorInfo(flavor=f['flavor'], version=f['version']) for f in proj['flavors']],
+        flavors=[FlavorInfo(
+            flavor=f['flavor'],
+            version=f['version'],
+            content={k: v for k, v in f['content'].items() if k != 'tags'} if f.get('content') else None
+        ) for f in proj['flavors']],
         priority=configs.get(f"project:{proj['key']}", {'priority': 'normal'})['priority'],
         fixed_flavor=configs.get(f"project:{proj['key']}", {}).get('fixed_flavor')
     ) for proj in sections['projects']]
-    
+
     skills = [SkillsInfo(flavor=s['flavor'], version=s['version']) for s in sections['skills']]
-    
+
     return AllSections(experiences=experiences, projects=projects, skills=skills)
 
 
