@@ -29,6 +29,7 @@ class AllSectionInfo(BaseModel):
     fixed_flavor: Optional[str] = None
 
 class SkillsInfo(BaseModel):
+    key: str
     flavor: str
     version: str
 

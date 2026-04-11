@@ -62,7 +62,7 @@ def get_sections_with_tags(db: Session, user_id: uuid.UUID) -> Dict[str, List]:
             grouped['projects'].append({'key': key, 'flavors': flavors})
         elif section_type == 'skills':
             for s in section_list:
-                grouped['skills'].append({'flavor': s.flavor, 'version': s.version, 'tags': s.content.get('tags', []), 'content': s.content})
+                grouped['skills'].append({'key': key, 'flavor': s.flavor, 'version': s.version, 'tags': s.content.get('tags', []), 'content': s.content})
     
     return grouped
 
@@ -121,7 +121,7 @@ def build_all_sections_response(sections: Dict[str, List], configs: Dict[str, Di
         fixed_flavor=configs.get(f"project:{proj['key']}", {}).get('fixed_flavor')
     ) for proj in sections['projects']]
 
-    skills = [SkillsInfo(flavor=s['flavor'], version=s['version']) for s in sections['skills']]
+    skills = [SkillsInfo(key=s['key'], flavor=s['flavor'], version=s['version']) for s in sections['skills']]
 
     return AllSections(experiences=experiences, projects=projects, skills=skills)
 
