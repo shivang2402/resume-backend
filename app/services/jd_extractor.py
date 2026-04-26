@@ -21,7 +21,7 @@ async def extract_jd_terms(api_key: str, job_description: str) -> Dict[str, Any]
         - remote: 'remote', 'hybrid', 'onsite', or 'unknown'
     """
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-2.0-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash')
     
     prompt = f"""Extract important information from this job description.
 

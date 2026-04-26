@@ -9,7 +9,7 @@ class KeywordServiceError(Exception):
 async def extract_keywords_with_ai(api_key: str, text: str) -> List[str]:
     """Use Gemini to extract technical keywords from text."""
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash')
     
     prompt = f"""Extract all technical keywords, skills, tools, and technologies from this text.
 Include: programming languages, frameworks, libraries, databases, cloud services, 
@@ -40,7 +40,7 @@ async def find_missing_keywords_with_ai(
 ) -> List[str]:
     """Use Gemini to find JD keywords missing from resume."""
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash')
     
     prompt = f"""Compare this job description with the resume content.
 Identify important technical keywords, skills, and requirements from the JD 

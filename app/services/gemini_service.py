@@ -38,7 +38,7 @@ class GeminiService:
     Uses BYOK (Bring Your Own Key) model - API key passed per request.
     """
     
-    DEFAULT_MODEL = "gemini-2.0-flash"
+    DEFAULT_MODEL = "gemini-2.5-flash"
     
     def __init__(self, api_key: str):
         """Initialize Gemini client with user's API key."""
@@ -206,7 +206,7 @@ async def analyze_jd_with_gemini(
     Returns suggestions and missing keywords.
     """
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-2.0-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash')
     
     prompt = build_analysis_prompt(
         job_description,

@@ -15,7 +15,7 @@ async def generate_section_tags(api_key: str, content: Dict[str, Any], section_t
     Tags include: tech skills, soft skills, impact keywords.
     """
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-2.0-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash')
     
     content_text = _content_to_text(content)
     

@@ -20,7 +20,7 @@ async def match_sections_to_jd(
     Match section tags against JD terms.
     """
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-2.0-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash')
     
     prompt = _build_match_prompt(jd_terms, jd_info, sections_with_tags, pinned_sections)
     
