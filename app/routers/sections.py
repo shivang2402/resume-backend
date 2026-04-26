@@ -3,7 +3,7 @@ Sections Router - CRUD with automatic tag generation.
 Tags are generated when Gemini API key is provided via X-Gemini-API-Key header.
 """
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 from uuid import UUID
 from typing import Optional, List
@@ -11,6 +11,8 @@ from typing import Optional, List
 from app.database import get_db
 from app.schemas.section import SectionCreate, SectionUpdate, SectionResponse
 from app.services import section_service
+from app.services.gemini_service import get_gemini_service, handle_gemini_error, GeminiServiceError
+from app.services.resume_parser import parse_resume_pdf
 from app.services.tag_generator import generate_section_tags
 
 router = APIRouter()
@@ -167,6 +169,44 @@ async def bulk_create_sections(
             })
     
     return results
+
+
+MAX_PDF_BYTES = 2 * 1024 * 1024  # 2 MB
+
+
+@router.post("/parse-pdf")
+async def parse_pdf_resume(
+    file: UploadFile = File(...),
+    user_id: UUID = Depends(get_current_user_id),
+    api_key: Optional[str] = Depends(get_gemini_api_key),
+):
+    """
+    Extract section suggestions from an uploaded resume PDF.
+
+    Returns a list of suggestions for the user to review/edit (flavor is
+    intentionally not suggested). Does not persist — the client commits via
+    POST /api/sections/bulk after the user fills in flavors.
+    """
+    if not api_key:
+        raise HTTPException(status_code=400, detail="X-Gemini-API-Key header required")
+    if file.content_type not in ("application/pdf", "application/x-pdf"):
+        raise HTTPException(status_code=400, detail="File must be a PDF")
+
+    contents = await file.read()
+    if len(contents) > MAX_PDF_BYTES:
+        raise HTTPException(status_code=413, detail="PDF must be 2 MB or smaller")
+    if not contents:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    try:
+        gemini = get_gemini_service(api_key)
+        suggestions = parse_resume_pdf(contents, gemini)
+    except GeminiServiceError as e:
+        raise handle_gemini_error(e)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to parse PDF: {e}")
+
+    return {"suggestions": suggestions}
 
 
 @router.put("/{type}/{key}/{flavor}")
